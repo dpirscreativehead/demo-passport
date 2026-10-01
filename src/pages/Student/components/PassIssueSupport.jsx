@@ -634,13 +634,13 @@ export default function PassDeskSupport({ onUseRfid, onSearchFocus }) {
 
   const emptyState = tab === "recent" ? {
     icon: "🗂️", title: "No passes yet",
-    text: "Passes appear here the moment they happen — issued at this desk, requested, approved, printed, returned, rejected or cancelled. Student passes and day passes together, newest on top.",
+    
   } : tab === "approved" ? {
     icon: "✅", title: "Nothing waiting to print",
-    text: "Passes the Principal approves appear here instantly. Press the print button to issue the slip and mark the student OUT — without scanning the card again.",
+    
   } : {
     icon: "⏳", title: "No pending requests",
-    text: "Day-pass requests raised at this desk wait here for the Principal's approval. Edit or cancel them at any time — no re-scanning needed.",
+    
   };
 
   const footNote = loading ? "Loading live data…"

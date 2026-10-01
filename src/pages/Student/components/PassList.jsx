@@ -852,8 +852,8 @@ export default function PassList() {
             <h3>{stats.total === 0 ? "No pass records yet" : "No matching passes"}</h3>
             <p>
               {stats.total === 0
-                ? "Passes appear here the moment they are created — student passes and day-pass requests from the gate desk, approvals and rejections from the Principal's desk."
-                : "Nothing matches the current search / filters. Try clearing them, or search a different field (e.g. name: or slip:)."}
+                ? " "
+                : "Nothing matches the current search"}
             </p>
             {stats.total > 0 && (
               <button type="button" className="pl-btn pl-btn-ghost" onClick={resetFilters}>Clear search &amp; filters</button>

@@ -407,13 +407,13 @@
   border: 1.5px dashed rgba(255, 254, 239, 0.16);
   border-radius: var(--spl-radius);
   padding: 56px 24px;
-  text-align: center;
+  text-align: center;  
 
   animation: splRise 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 .spl-empty-icon { font-size: 38px; margin-bottom: 10px; }
-.spl-empty h3 { margin: 0 0 6px; font-size: 16.5px; color: var(--spl-ink); }
-.spl-empty p { margin: 0; font-size: 13px; color: var(--spl-ink-soft); }
+.spl-empty h3 { margin: 0 0 6px; font-size: 16.5px; color: var(--spl-card-solid); }
+.spl-empty p { margin: 0; font-size: 13px; color: var(--spl-card-solid); }
 
 /* ---------------- record row ---------------- */
 .spl-row {

@@ -7,6 +7,7 @@ const permissions = {
         Prefrences: false,
         Users: true,
         Data: true,
+        Reports: true,
         StudentManage: true,
         PassIssue: true,
         PassIssueSupport: true,
@@ -23,6 +24,7 @@ const permissions = {
         Prefrences: false,
         Users: true,
         Data: false,
+        Reports: true,
         StudentManage: true,
         PassIssue: true,
         PassIssueSupport: true,
@@ -37,6 +39,7 @@ const permissions = {
     Receptionist: {
         Prefrences: false,
         Users: false,
+        Reports: true,
         StudentManage: false,
         PassIssue: true,
         PassIssueSupport: true,
@@ -49,6 +52,7 @@ const permissions = {
     },
 
     Principal: {
+        Reports: true,
         RequestManage: true,
         PassList: true,
         PassIssueSupport: false,
@@ -60,7 +64,14 @@ const permissions = {
         RequestManage: true,        
         StaffRequests: true, 
         PassIssueSupport: false,       
-    }    
+    },   
+    
+    Coordinator: {
+        Reports: false,
+        PassList: true,
+        StaffPassList: true,
+
+    }
 };
 
 export async function hasPermission(permission) {

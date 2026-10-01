@@ -288,10 +288,12 @@ function Sidebar() {
                         <span className="nav-label">Staff</span>
                     </NavLink>
 
+                    <Permission permission="Reports">
                     <NavLink to="/reports">
                         <span className="nav-icon"><IconChart /></span>
                         <span className="nav-label">Reports</span>
                     </NavLink>
+                    </Permission>
 
                     <Permission permission="Preferences">
                     <NavLink to="/preferences">

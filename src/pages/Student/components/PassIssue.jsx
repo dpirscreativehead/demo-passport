@@ -323,6 +323,59 @@ function printSlip(pass) {
 
 /* ===================================================================== */
 
+/* ---------- 80 mm thermal ENTRY slip — printed when [Mark In] is pressed.
+   Exactly the same look as the exit slip: school title · "ENTRY PASS" ·
+   the pass's slip number · student / class / ID No · reason autofilled
+   from the pass being closed · check-in time = the moment the button was
+   pressed. Printed through the same hidden-iframe method as printSlip. ---------- */
+function printEntrySlip(pass, nowIso) {
+  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const checkedInAt = new Date(nowIso || Date.now());
+
+  const rows = [
+    ["Student", pass.name || "—"],
+    ["Class", pass.className || "—"],
+    ["ID No", pass.studentId || "—"],
+    ["Reason", pass.reason || "—"],
+  ]
+    .map(([k, v]) => `<div class="r"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`)
+    .join("");
+
+  const html =
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Entry Pass ${esc(pass.slipNo || "")}</title><style>` +
+    `@page{size:80mm auto;margin:2mm}html,body{margin:0;padding:0}` +
+    `body{width:76mm;font-family:"Consolas","Courier New",monospace;color:#000}` +
+    `.c{text-align:center}.school{font-size:12px;font-weight:bold;letter-spacing:.4px}` +
+    `.slip{font-size:17px;font-weight:bold;letter-spacing:5px;margin:1.5mm 0 .5mm}` +
+    `.no{font-size:11px;letter-spacing:1px}.hr{border-top:1px dashed #000;margin:2mm 0}` +
+    `.r{display:flex;font-size:11px;line-height:1.55}.k{width:24mm;flex-shrink:0;font-weight:bold}` +
+    `.v{flex:1;word-break:break-word}.stamp{font-size:10.5px;line-height:1.6}` +
+    `.note{font-size:9.5px;line-height:1.5}.foot{font-size:9.5px;margin-top:1.5mm}` +
+    `</style></head><body>` +
+    `<div class="c school">${esc(SCHOOL_NAME)}</div>` +
+    `<div class="c slip">ENTRY PASS</div>` +
+    `<div class="c no">${esc(pass.slipNo || "")}</div>` +
+    `<div class="hr"></div>${rows}<div class="hr"></div>` +
+    `<div class="c stamp">Checked in: ${esc(checkedInAt.toLocaleString([], { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }))}</div>` +
+    `<div class="hr"></div>` +
+    `<div class="c foot">— DPIRS PassPort —</div>` +
+    `</body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    const win = iframe.contentWindow;
+    if (!win) { iframe.remove(); return; }
+    const remove = () => { try { iframe.remove(); } catch (err) { /* ignore */ } };
+    try { win.focus(); win.print(); } catch (err) { remove(); return; }
+    win.onafterprint = remove;
+    setTimeout(remove, 60000);
+  };
+  iframe.srcdoc = html;
+}
+
 export default function PassIssue() {
   /* ================= STATE ================= */
   const [current, setCurrent] = useState(null);     // student shown in the panel
@@ -936,7 +989,7 @@ export default function PassIssue() {
   };
 
   /* ================= MARK IN ================= */
-  const handleMarkIn = () => {
+    const handleMarkIn = () => {
     if (!current) return;
     const now = new Date().toISOString();
     const active = findActivePass(readPasses(), current);
@@ -946,9 +999,26 @@ export default function PassIssue() {
       patchPass(openPass, { status: "RETURNED", returnedAt: now });   // works wherever the pass lives
     }
     setStudentStatus(current, "IN", now);
+
+    /* DIRECT PRINT — entry slip, exactly like the exit slips:
+       school title · ENTRY PASS · the pass's slip number · student /
+       class / ID No · reason autofilled from the pass being closed ·
+       check-in time = this exact moment. If the student was OUT with
+       no pass on file, the slip still prints from the student details. */
+    printEntrySlip(
+      openPass || {
+        name: current.name,
+        className: current.className,
+        studentId: current.studentId,
+        reason: "",
+        slipNo: "",
+      },
+      now
+    );
+
     refreshCurrent();
     beep(true);
-    showToast(`✓ ${current.name} marked IN${openPass ? ` — ${isStudentPass(openPass) ? "student pass" : "day pass"} closed` : ""}`, "success");
+    showToast(`✓ ${current.name} marked IN${openPass ? ` — ${isStudentPass(openPass) ? "student pass" : "day pass"} closed` : ""} · entry slip sent to the printer`, "success");
   };
 
   /* ================= PRINT AN APPROVED DAY PASS =================

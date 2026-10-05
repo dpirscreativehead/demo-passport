@@ -855,3 +855,76 @@
         transition-duration: 0.01ms !important;
     }
 }
+
+/* =====================================================================
+   ROW + MODAL ACTION BUTTONS — re-print / mark in (added)
+   Same premium dark / lime language as the rest of the theme.
+   ===================================================================== */
+
+/* ---------- row icon buttons ---------- */
+.pl-iconbtn {
+    width: 34px; height: 34px; flex-shrink: 0;
+    display: grid; place-items: center;
+
+    border-radius: 10px;
+    border: 1px solid;
+    font-size: 14px; line-height: 1; cursor: pointer;
+    background: transparent;
+
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.pl-iconbtn:active { transform: scale(0.92); }
+.pl-iconbtn:focus-visible { outline: 2px solid #9fd700; outline-offset: 2px; }
+
+.pl-iconbtn-print {
+    color: #c7f545;
+    border-color: rgba(159, 215, 0, 0.35);
+    background: rgba(159, 215, 0, 0.08);
+}
+.pl-iconbtn-print:hover { background: rgba(159, 215, 0, 0.20); border-color: rgba(159, 215, 0, 0.60); }
+
+.pl-iconbtn-in {
+    color: #9cc8ff;
+    border-color: rgba(140, 190, 255, 0.35);
+    background: rgba(140, 190, 255, 0.08);
+}
+.pl-iconbtn-in:hover { background: rgba(140, 190, 255, 0.20); border-color: rgba(140, 190, 255, 0.60); }
+
+/* ---------- modal footer action buttons ---------- */
+.pl-btn-primary,
+.pl-btn-in {
+    height: 42px; padding: 0 18px;
+    border-radius: 12px;
+    font-size: 0.86rem; font-weight: 700; font-family: inherit;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    cursor: pointer; white-space: nowrap;
+
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease,
+                box-shadow 0.2s ease, transform 0.15s ease;
+}
+.pl-btn-primary:active, .pl-btn-in:active { transform: scale(0.97); }
+.pl-btn-primary:focus-visible, .pl-btn-in:focus-visible { outline: 2px solid #9fd700; outline-offset: 2px; }
+
+.pl-btn-primary {
+    background: linear-gradient(135deg, #a4dd00 0%, #c7f545 100%);
+    color: #20290f;
+    border: 1px solid transparent;
+    box-shadow: 0 14px 30px -10px rgba(159, 215, 0, 0.55),
+                inset 0 1px 0 rgba(255, 255, 255, 0.30);
+}
+.pl-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 18px 36px -10px rgba(159, 215, 0, 0.70); }
+
+.pl-btn-in {
+    background: rgba(140, 190, 255, 0.12);
+    color: #9cc8ff;
+    border: 1px solid rgba(140, 190, 255, 0.35);
+}
+.pl-btn-in:hover { background: rgba(140, 190, 255, 0.22); border-color: rgba(140, 190, 255, 0.60); }
+
+/* smaller icons on narrow screens · never printed with Ctrl+P */
+@media (max-width: 700px) {
+    .pl-iconbtn { width: 30px; height: 30px; font-size: 12.5px; }
+}
+@media print {
+    .pl-iconbtn { display: none !important; }
+}

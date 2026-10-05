@@ -87,6 +87,10 @@ const DEFAULT_STATUS = {
 
 const TIME_FIELDS = ["createdAt", "requestedAt", "approvedAt", "issuedAt", "printedAt", "returnedAt", "rejectedAt", "cancelledAt"];
 
+/* statuses whose slip was already printed — the same pass can be
+   re-printed any time: ONLY the printing time changes, nothing else */
+const REPRINTABLE = ["ISSUED", "RETURNED"];
+
 /* ---------------- small helpers ---------------- */
 const p2 = (n) => String(n).padStart(2, "0");
 
@@ -318,6 +322,59 @@ function printSlip(pass) {
     win.onafterprint = remove;
     setTimeout(remove, 60000);
   };
+    iframe.srcdoc = html;
+}
+
+/* ---------- 80 mm thermal ENTRY slip — printed when [Mark In] is pressed.
+   Exactly the same look as the exit slip: school title · "ENTRY PASS" ·
+   the pass's slip number · student / class / ID No · reason autofilled
+   from the pass being closed · check-in time = the moment the button was
+   pressed. Printed through the same hidden-iframe method as printSlip. ---------- */
+function printEntrySlip(pass, nowIso) {
+  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const checkedInAt = new Date(nowIso || Date.now());
+
+  const rows = [
+    ["Student", pass.name || "—"],
+    ["Class", pass.className || "—"],
+    ["ID No", pass.studentId || "—"],
+    ["Reason", pass.reason || "—"],
+  ]
+    .map(([k, v]) => `<div class="r"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`)
+    .join("");
+
+  const html =
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Entry Pass ${esc(pass.slipNo || "")}</title><style>` +
+    `@page{size:80mm auto;margin:2mm}html,body{margin:0;padding:0}` +
+    `body{width:76mm;font-family:"Consolas","Courier New",monospace;color:#000}` +
+    `.c{text-align:center}.school{font-size:12px;font-weight:bold;letter-spacing:.4px}` +
+    `.slip{font-size:17px;font-weight:bold;letter-spacing:5px;margin:1.5mm 0 .5mm}` +
+    `.no{font-size:11px;letter-spacing:1px}.hr{border-top:1px dashed #000;margin:2mm 0}` +
+    `.r{display:flex;font-size:11px;line-height:1.55}.k{width:24mm;flex-shrink:0;font-weight:bold}` +
+    `.v{flex:1;word-break:break-word}.stamp{font-size:10.5px;line-height:1.6}` +
+    `.note{font-size:9.5px;line-height:1.5}.foot{font-size:9.5px;margin-top:1.5mm}` +
+    `</style></head><body>` +
+    `<div class="c school">${esc(SCHOOL_NAME)}</div>` +
+    `<div class="c slip">ENTRY PASS</div>` +
+    `<div class="c no">${esc(pass.slipNo || "")}</div>` +
+    `<div class="hr"></div>${rows}<div class="hr"></div>` +
+    `<div class="c stamp">Checked in: ${esc(checkedInAt.toLocaleString([], { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }))}</div>` +
+    `<div class="hr"></div>` +
+    `<div class="c foot">— DPIRS PassPort —</div>` +
+    `</body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    const win = iframe.contentWindow;
+    if (!win) { iframe.remove(); return; }
+    const remove = () => { try { iframe.remove(); } catch (err) { /* ignore */ } };
+    try { win.focus(); win.print(); } catch (err) { remove(); return; }
+    win.onafterprint = remove;
+    setTimeout(remove, 60000);
+  };
   iframe.srcdoc = html;
 }
 
@@ -500,9 +557,93 @@ export default function PassDeskSupport({ onUseRfid, onSearchFocus }) {
       })
       .catch(() => showToast("⚠ Could not save the print — check your Firebase connection / rules.", "error"));
 
+        printSlip({ ...fresh, ...patch });
+    setDetail(null);
+    showToast(`✓ Pass re-printed for ${fresh.name} — slip ${fresh.slipNo || "—"} · only the printing time changed`, "success");
+  };
+
+  /* ================= MARK IN (from the detail modal) =================
+     The exact action of the Pass Issue desk's [Mark In] button: the open
+     pass (status ISSUED) closes → RETURNED with the return time, the
+     student is marked IN, and the 80 mm ENTRY slip prints — same look as
+     the exit slip, reason autofilled from the pass being closed and the
+     check-in time = the moment the button was pressed. */
+  const handleMarkIn = (pass) => {
+    if (printBusyRef.current) return;
+    const fresh = allPasses.find((p) => p._id === pass._id) || pass;
+
+    if (fresh.status !== "ISSUED") {
+      setDetail(null);
+      showToast("This pass is not currently open — the student may already be back.", "error");
+      return;
+    }
+
+    printBusyRef.current = true;
+    setTimeout(() => { printBusyRef.current = false; }, 1200);
+
+    const now = new Date().toISOString();
+    const patch = { status: "RETURNED", returnedAt: now };
+
+    /* optimistic — the row turns Returned instantly */
+    if (fresh.source === DB_STUDENTPASS_PATH) {
+      setStudentPasses((prev) => prev.map((p) => (p._id === fresh._id ? { ...p, ...patch } : p)));
+    } else if (fresh.source === DB_APPROVED_PATH) {
+      setDaypasses((prev) => prev.map((p) => (p._id === fresh._id ? { ...p, ...patch } : p)));
+    }
+
+    /* the pass stays in whatever collection it lives in — status → RETURNED */
+    update(ref(database, `${fresh.source}/${fresh._id}`), patch)
+      .then(() => {
+        const student = studentFor(fresh);
+        if (student) {
+          update(ref(database, `${DB_STUDENTS_PATH}/${student._id}`), { status: "IN", lastMovement: now })
+            .catch(() => { /* best-effort — Firebase pushes the corrected state */ });
+        }
+      })
+      .catch(() => showToast("⚠ Could not save the return — check your Firebase connection / rules.", "error"));
+
+    /* ENTRY slip — printed exactly like the desk's [Mark In] */
+    printEntrySlip(fresh, now);
+    setDetail(null);
+    showToast(`✓ ${fresh.name} marked IN — ${isStudentPass(fresh) ? "student pass" : "day pass"} closed · entry slip sent to the printer`, "success");
+  };
+
+  /* ================= RE-PRINT AN ALREADY-PRINTED PASS =================
+     Any pass that was already printed (ISSUED or RETURNED) can be
+     re-printed from the list rows or the details modal. The SAME slip
+     prints again — same slip number, same details, same status — ONLY
+     the printing time changes (printedAt → now). The student's status
+     and every other field are left exactly as they are. */
+  const handleReprint = (pass) => {
+    if (printBusyRef.current) return;
+    const fresh = allPasses.find((p) => p._id === pass._id) || pass;
+
+    if (REPRINTABLE.indexOf(fresh.status) === -1) {
+      setDetail(null);
+      showToast("Only issued or returned passes can be re-printed.", "error");
+      return;
+    }
+
+    printBusyRef.current = true;
+    setTimeout(() => { printBusyRef.current = false; }, 1200);
+
+    /* ONLY the printing time changes — every other detail stays the same */
+    const patch = { printedAt: new Date().toISOString() };
+
+    /* optimistic — the row's "Printed" time updates instantly */
+    if (fresh.source === DB_STUDENTPASS_PATH) {
+      setStudentPasses((prev) => prev.map((p) => (p._id === fresh._id ? { ...p, ...patch } : p)));
+    } else if (fresh.source === DB_APPROVED_PATH) {
+      setDaypasses((prev) => prev.map((p) => (p._id === fresh._id ? { ...p, ...patch } : p)));
+    }
+
+    /* the pass stays in whatever collection it lives in — only printedAt moves */
+    update(ref(database, `${fresh.source}/${fresh._id}`), patch)
+      .catch(() => showToast("⚠ Could not save the re-print — check your Firebase connection / rules.", "error"));
+
     printSlip({ ...fresh, ...patch });
     setDetail(null);
-    showToast(`✓ Day pass printed for ${fresh.name} — slip ${slipNo} · student marked OUT`, "success");
+    showToast(`✓ Pass re-printed for ${fresh.name} — slip ${fresh.slipNo || "—"} · only the printing time changed`, "success");
   };
 
   /* ================= CANCEL A PENDING REQUEST =================
@@ -723,13 +864,22 @@ export default function PassDeskSupport({ onUseRfid, onSearchFocus }) {
                       <span className="ds-row-time-ago">{timeAgo(t)}</span>
                     </div>
 
-                    {p.status === "APPROVED" && (
+                                        {p.status === "APPROVED" && (
                       <button
                         type="button"
                         className="ds-iconbtn ds-iconbtn-print"
                         title="Print this approved day pass (same as the desk above)"
                         aria-label={`Print approved pass for ${p.name}`}
                         onClick={(e) => { e.stopPropagation(); handlePrint(p); }}
+                      >🖨</button>
+                    )}
+                    {REPRINTABLE.indexOf(p.status) !== -1 && (
+                      <button
+                        type="button"
+                        className="ds-iconbtn ds-iconbtn-print"
+                        title="Re-print this pass — only the printing time changes"
+                        aria-label={`Re-print pass for ${p.name}`}
+                        onClick={(e) => { e.stopPropagation(); handleReprint(p); }}
                       >🖨</button>
                     )}
                     {p.status === "REQUESTED" && (
@@ -933,16 +1083,22 @@ export default function PassDeskSupport({ onUseRfid, onSearchFocus }) {
                 </ol>
               </div>
 
-              <footer className="ds-modal-foot">
+                            <footer className="ds-modal-foot">
                 <button type="button" className="ds-btn ds-btn-ghost" onClick={closeDetail}>Close</button>
+                {liveDetail.status === "ISSUED" && (
+                  <button type="button" className="ds-btn ds-btn-primary" onClick={() => handleMarkIn(liveDetail)}>↩ Mark In</button>
+                )}
                 {liveDetail.status === "REQUESTED" && (
                   <>
                     <button type="button" className="ds-btn ds-btn-ghost" onClick={() => openEdit(liveDetail)}>✎ Edit Request</button>
                     <button type="button" className="ds-btn ds-btn-danger" onClick={() => handleCancelRequest(liveDetail)}>✕ Cancel Request</button>
                   </>
                 )}
-                {liveDetail.status === "APPROVED" && (
+                                {liveDetail.status === "APPROVED" && (
                   <button type="button" className="ds-btn ds-btn-primary" onClick={() => handlePrint(liveDetail)}>🖨 Print Pass</button>
+                )}
+                {REPRINTABLE.indexOf(liveDetail.status) !== -1 && (
+                  <button type="button" className="ds-btn ds-btn-primary" onClick={() => handleReprint(liveDetail)}>🖨 Re-print Pass</button>
                 )}
               </footer>
             </div>

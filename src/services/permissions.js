@@ -44,7 +44,7 @@ const permissions = {
         PassIssue: true,
         PassIssueSupport: true,
         PassList: true,
-        RequestManage: false,
+        RequestManage: true,
         StaffManage: false,
         StaffPass: true,
         StaffPassList: true,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { ref, onValue } from "firebase/database";
+import { ref, onValue, update } from "firebase/database";
 import { database } from "../../../firebase/config"; // ← same config PassIssue / RequestManage use — adjust the relative path if this component sits at a different depth
 import "./PassList.css";
 
@@ -54,6 +54,13 @@ const DB_REQUEST_PATH     = "studentRequest";       // pending day-pass requests
 const DB_APPROVED_PATH    = "daypass";              // approved / printed day passes
 const DB_REJECTED_PATH    = "rejectedStudentPass";  // rejected requests — permanent records
 const DB_CANCELLED_PATH   = "cancelledStudentPass"; // cancelled requests — permanent records
+const DB_STUDENTS_PATH    = "students";             // student master data (status write on Mark In)
+
+const SCHOOL_NAME = "De Paul International Residential School, Mysore";   // printed on every slip
+
+/* statuses whose slip was already printed — the same pass can be re-printed:
+   ONLY the printing time changes, nothing else */
+const REPRINTABLE = ["ISSUED", "RETURNED"];
 
 const PAGE_SIZE   = 40;      // rows rendered at once — "Show more" appends another page
 const DAY_MS      = 86400000;
@@ -178,6 +185,15 @@ function fmtExpected(v) {
     : d.toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" });
 }
 
+/* full "12 Jun 2025, 04:35 pm" for LOCAL expectedReturn strings — used on the printed slip */
+function fmtFull(v) {
+  const d = parseLocal(v);
+  if (!d) return String(v || "—");
+  return /T\d{2}:\d{2}/.test(String(v))
+    ? d.toLocaleString([], { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" });
+}
+
 function isTodayDate(v) {
   const d = parseLocal(v);
   if (!d) return false;
@@ -296,6 +312,111 @@ function statusTimeValue(p) {
   }
 }
 function statusTimeMs(p) { return tsMs(statusTimeValue(p)); }
+
+/* ---------- 80 mm thermal slip — IDENTICAL to the gate desk's printer ---------- */
+function printSlip(pass) {
+  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const isStudent = String((pass && pass.kind) || "").toUpperCase() === "STUDENT_PASS";
+  const issuedAt = new Date(pass.printedAt || pass.issuedAt || Date.now());
+
+  const rows = [
+    ["Student", pass.name],
+    ["Class", pass.className],
+    ["ID No", pass.studentId],
+    ["Reason", pass.reason],
+    ...(pass.goingWith ? [["Going with", fmtGoingWith(pass)]] : []),
+    ["Return by", fmtFull(pass.expectedReturn)],
+    ["Authorized", pass.authorizedBy || "Principal"],
+  ]
+    .map(([k, v]) => `<div class="r"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`)
+    .join("");
+
+  const html =
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${isStudent ? "Student Pass" : "Day Pass"} ${esc(pass.slipNo || "")}</title><style>` +
+    `@page{size:80mm auto;margin:2mm}html,body{margin:0;padding:0}` +
+    `body{width:76mm;font-family:"Consolas","Courier New",monospace;color:#000}` +
+    `.c{text-align:center}.school{font-size:12px;font-weight:bold;letter-spacing:.4px}` +
+    `.slip{font-size:17px;font-weight:bold;letter-spacing:5px;margin:1.5mm 0 .5mm}` +
+    `.no{font-size:11px;letter-spacing:1px}.hr{border-top:1px dashed #000;margin:2mm 0}` +
+    `.r{display:flex;font-size:11px;line-height:1.55}.k{width:24mm;flex-shrink:0;font-weight:bold}` +
+    `.v{flex:1;word-break:break-word}.stamp{font-size:10.5px;line-height:1.6}` +
+    `.note{font-size:9.5px;line-height:1.5}.foot{font-size:9.5px;margin-top:1.5mm}` +
+    `</style></head><body>` +
+    `<div class="c school">${esc(SCHOOL_NAME)}</div>` +
+    `<div class="c slip">${isStudent ? "STUDENT PASS" : "DAY PASS"}</div>` +
+    `<div class="c no">${esc(pass.slipNo || "")}</div>` +
+    `<div class="hr"></div>${rows}<div class="hr"></div>` +
+    `<div class="c stamp">Issued: ${esc(issuedAt.toLocaleString([], { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }))}</div>` +
+    `<div class="hr"></div>` +
+    `<div class="c foot">— DPIRS PassPort —</div>` +
+    `</body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    const win = iframe.contentWindow;
+    if (!win) { iframe.remove(); return; }
+    const remove = () => { try { iframe.remove(); } catch (err) { /* ignore */ } };
+    try { win.focus(); win.print(); } catch (err) { remove(); return; }
+    win.onafterprint = remove;
+    setTimeout(remove, 60000);
+  };
+  iframe.srcdoc = html;
+}
+
+/* ---------- 80 mm thermal ENTRY slip — printed when [Mark In] is pressed.
+   Same look as the exit slip: school title · "ENTRY PASS" · the pass's
+   slip number · student / class / ID No · reason autofilled from the pass
+   being closed · check-in time = the moment the button was pressed. ---------- */
+function printEntrySlip(pass, nowIso) {
+  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const checkedInAt = new Date(nowIso || Date.now());
+
+  const rows = [
+    ["Student", pass.name || "—"],
+    ["Class", pass.className || "—"],
+    ["ID No", pass.studentId || "—"],
+    ["Reason", pass.reason || "—"],
+  ]
+    .map(([k, v]) => `<div class="r"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`)
+    .join("");
+
+  const html =
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Entry Pass ${esc(pass.slipNo || "")}</title><style>` +
+    `@page{size:80mm auto;margin:2mm}html,body{margin:0;padding:0}` +
+    `body{width:76mm;font-family:"Consolas","Courier New",monospace;color:#000}` +
+    `.c{text-align:center}.school{font-size:12px;font-weight:bold;letter-spacing:.4px}` +
+    `.slip{font-size:17px;font-weight:bold;letter-spacing:5px;margin:1.5mm 0 .5mm}` +
+    `.no{font-size:11px;letter-spacing:1px}.hr{border-top:1px dashed #000;margin:2mm 0}` +
+    `.r{display:flex;font-size:11px;line-height:1.55}.k{width:24mm;flex-shrink:0;font-weight:bold}` +
+    `.v{flex:1;word-break:break-word}.stamp{font-size:10.5px;line-height:1.6}` +
+    `.note{font-size:9.5px;line-height:1.5}.foot{font-size:9.5px;margin-top:1.5mm}` +
+    `</style></head><body>` +
+    `<div class="c school">${esc(SCHOOL_NAME)}</div>` +
+    `<div class="c slip">ENTRY PASS</div>` +
+    `<div class="c no">${esc(pass.slipNo || "")}</div>` +
+    `<div class="hr"></div>${rows}<div class="hr"></div>` +
+    `<div class="c stamp">Checked in: ${esc(checkedInAt.toLocaleString([], { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }))}</div>` +
+    `<div class="hr"></div>` +
+    `<div class="c foot">— DPIRS PassPort —</div>` +
+    `</body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    const win = iframe.contentWindow;
+    if (!win) { iframe.remove(); return; }
+    const remove = () => { try { iframe.remove(); } catch (err) { /* ignore */ } };
+    try { win.focus(); win.print(); } catch (err) { remove(); return; }
+    win.onafterprint = remove;
+    setTimeout(remove, 60000);
+  };
+  iframe.srcdoc = html;
+}
 
 /* ---------------- smart search ---------------- */
 function parseQuery(q) {
@@ -428,8 +549,9 @@ export default function PassList() {
   const [sortBy, setSortBy]       = useState("newest");
   const [limit, setLimit]         = useState(PAGE_SIZE);
   const [detail, setDetail]       = useState(null);          // the pass whose modal is open
-  const [toast, setToast]         = useState(null);
+    const [toast, setToast]         = useState(null);
   const toastTimerRef = useRef(null);
+  const actionBusyRef = useRef(false);   // double-action guard (re-print / mark in)
 
   /* ================= CLOCK ================= */
   useEffect(() => {
@@ -596,7 +718,88 @@ export default function PassList() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-    showToast(`✓ Exported ${visible.length} pass record${visible.length === 1 ? "" : "s"} (current filter) to CSV`, "success");
+        showToast(`✓ Exported ${visible.length} pass record${visible.length === 1 ? "" : "s"} (current filter) to CSV`, "success");
+  };
+
+  /* ================= RE-PRINT AN ALREADY-PRINTED PASS =================
+     Any pass that was already printed (ISSUED or RETURNED) can be
+     re-printed from the rows or the detail modal. The SAME slip prints
+     again — same slip number, same details, same status — ONLY the
+     printing time changes (printedAt → now). */
+  const handleReprint = (pass) => {
+    if (actionBusyRef.current) return;
+    const fresh = allPasses.find((p) => p._id === pass._id) || pass;
+
+    if (REPRINTABLE.indexOf(fresh.status) === -1) {
+      setDetail(null);
+      showToast("Only issued or returned passes can be re-printed.", "error");
+      return;
+    }
+
+    actionBusyRef.current = true;
+    setTimeout(() => { actionBusyRef.current = false; }, 1200);
+
+    /* ONLY the printing time changes — every other detail stays the same */
+    const patch = { printedAt: new Date().toISOString() };
+
+    /* optimistic — the row's "Issued" time updates instantly */
+    if (fresh.source === DB_STUDENTPASS_PATH) {
+      setStudentPasses((prev) => prev.map((p) => (p._id === fresh._id ? { ...p, ...patch } : p)));
+    } else if (fresh.source === DB_APPROVED_PATH) {
+      setDaypasses((prev) => prev.map((p) => (p._id === fresh._id ? { ...p, ...patch } : p)));
+    }
+
+    /* the pass stays in whatever collection it lives in — only printedAt moves */
+    update(ref(database, `${fresh.source}/${fresh._id}`), patch)
+      .catch(() => showToast("⚠ Could not save the re-print — check your Firebase connection / rules.", "error"));
+
+    printSlip(fresh);
+    setDetail(null);
+    showToast(`✓ Pass re-printed for ${fresh.name} — slip ${fresh.slipNo || "—"} · only the printing time changed`, "success");
+  };
+
+  /* ================= MARK IN (from a row or the detail modal) =================
+     The exact action of the Pass Issue desk's [Mark In] button: the open
+     pass (status ISSUED) closes → RETURNED with the return time, the
+     student is marked IN, and the 80 mm ENTRY slip prints — reason
+     autofilled from the pass being closed, check-in time = now. */
+  const handleMarkIn = (pass) => {
+    if (actionBusyRef.current) return;
+    const fresh = allPasses.find((p) => p._id === pass._id) || pass;
+
+    if (fresh.status !== "ISSUED") {
+      setDetail(null);
+      showToast("This pass is not currently open — the student may already be back.", "error");
+      return;
+    }
+
+    actionBusyRef.current = true;
+    setTimeout(() => { actionBusyRef.current = false; }, 1200);
+
+    const now = new Date().toISOString();
+    const patch = { status: "RETURNED", returnedAt: now };
+
+    /* optimistic — the row turns Returned instantly */
+    if (fresh.source === DB_STUDENTPASS_PATH) {
+      setStudentPasses((prev) => prev.map((p) => (p._id === fresh._id ? { ...p, ...patch } : p)));
+    } else if (fresh.source === DB_APPROVED_PATH) {
+      setDaypasses((prev) => prev.map((p) => (p._id === fresh._id ? { ...p, ...patch } : p)));
+    }
+
+    /* the pass stays in whatever collection it lives in — status → RETURNED */
+    update(ref(database, `${fresh.source}/${fresh._id}`), patch)
+      .then(() => {
+        if (fresh.studentKey) {
+          update(ref(database, `${DB_STUDENTS_PATH}/${fresh.studentKey}`), { status: "IN", lastMovement: now })
+            .catch(() => { /* best-effort — Firebase pushes the corrected state */ });
+        }
+      })
+      .catch(() => showToast("⚠ Could not save the return — check your Firebase connection / rules.", "error"));
+
+    /* ENTRY slip — printed exactly like the desk's [Mark In] */
+    printEntrySlip(fresh, now);
+    setDetail(null);
+    showToast(`✓ ${fresh.name} marked IN — ${fresh.kind === "STUDENT_PASS" ? "student pass" : "day pass"} closed · entry slip sent to the printer`, "success");
   };
 
      /* ================= MODAL RENDER =================
@@ -708,7 +911,13 @@ export default function PassList() {
           </div>
 
                     <footer className="pl-modal-foot">
-            <button type="button" className="pl-btn pl-btn-ghost" onClick={closeDetail}>Close</button>
+                        <button type="button" className="pl-btn pl-btn-ghost" onClick={closeDetail}>Close</button>
+            {livePass.status === "ISSUED" && (
+              <button type="button" className="pl-btn pl-btn-in" onClick={() => handleMarkIn(livePass)}>↩ Mark In</button>
+            )}
+            {REPRINTABLE.indexOf(livePass.status) !== -1 && (
+              <button type="button" className="pl-btn pl-btn-primary" onClick={() => handleReprint(livePass)}>🖨 Re-print Pass</button>
+            )}
           </footer>
         </div>
       </div>,
@@ -871,7 +1080,7 @@ export default function PassList() {
                     role="button"
                     tabIndex={0}
                     onClick={() => setDetail(p)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetail(p); } }}
+                    onKeyDown={(e) => { if (e.target.tagName === "BUTTON") return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetail(p); } }}
                     aria-label={`Pass details — ${p.name}, ${(KIND_META[p.kind] || {}).label || p.kind}, ${meta.label}`}
                     style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
                   >
@@ -897,6 +1106,25 @@ export default function PassList() {
                       <span className="pl-row-time-value">{fmtDateTime(statusTimeValue(p))}</span>
                       <span className="pl-row-time-ago">{timeAgo(statusTimeValue(p))}</span>
                     </div>
+
+                                        {REPRINTABLE.indexOf(p.status) !== -1 && (
+                      <button
+                        type="button"
+                        className="pl-iconbtn pl-iconbtn-print"
+                        title="Re-print this pass — only the printing time changes"
+                        aria-label={`Re-print pass for ${p.name}`}
+                        onClick={(e) => { e.stopPropagation(); handleReprint(p); }}
+                      >🖨</button>
+                    )}
+                    {p.status === "ISSUED" && (
+                      <button
+                        type="button"
+                        className="pl-iconbtn pl-iconbtn-in"
+                        title="Mark the student IN — closes this pass and prints the entry slip"
+                        aria-label={`Mark ${p.name} in`}
+                        onClick={(e) => { e.stopPropagation(); handleMarkIn(p); }}
+                      >↩</button>
+                    )}
 
                     <span className="pl-row-chevron" aria-hidden="true">›</span>
                   </article>

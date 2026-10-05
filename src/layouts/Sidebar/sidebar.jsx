@@ -32,6 +32,15 @@ const IconCap = () => (
     </svg>
 );
 
+const IconBulkPass = () => (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="5" width="14" height="11" rx="2" />
+        <path d="M7 9h6" />
+        <path d="M7 12h4" />
+        <path d="M7 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2" />
+    </svg>
+);
+
 const IconBriefcase = () => (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <rect x="2.5" y="7" width="19" height="13.5" rx="2.5" />
@@ -284,7 +293,7 @@ function Sidebar() {
                     </NavLink>
 
                     <NavLink to="/bulk">
-                        <span className="nav-icon"><IconCap /></span>
+                        <span className="nav-icon"><IconBulkPass /></span>
                         <span className="nav-label">Bulk</span>
                     </NavLink>
 

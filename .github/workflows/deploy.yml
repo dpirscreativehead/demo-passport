@@ -1,4 +1,4 @@
-name: Deploy Passport to GitHub Pages
+name: Deploy Demo Passport to GitHub Pages
 
 on:
   push:

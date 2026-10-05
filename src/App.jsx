@@ -8,6 +8,7 @@ import PermissionRoute from "../src/components/PermissionRoute";
 
 import Dashboard from "./pages/Dashboard/dashboard";
 import Student from "./pages/Student/student";
+import Bulk from "./pages/Bulk/bulk";
 import Staff from "./pages/Staff/staff";
 import Reports from "./pages/Reports/reports";
 import Preferences from "./pages/Preferences/preferences";
@@ -38,6 +39,8 @@ function App() {
                         <Route path="/dashboard" element={<Dashboard />} />
 
                         <Route path="/student" element={<Student />} />
+
+                        <Route path="/bulk" element={<Bulk />} />
 
                         <Route path="/staff" element={<Staff />} />
 

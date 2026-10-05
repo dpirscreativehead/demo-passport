@@ -283,6 +283,11 @@ function Sidebar() {
                         <span className="nav-label">Student</span>
                     </NavLink>
 
+                    <NavLink to="/bulk">
+                        <span className="nav-icon"><IconCap /></span>
+                        <span className="nav-label">Bulk</span>
+                    </NavLink>
+
                     <NavLink to="/staff">
                         <span className="nav-icon"><IconBriefcase /></span>
                         <span className="nav-label">Staff</span>
